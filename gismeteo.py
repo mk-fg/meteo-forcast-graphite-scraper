@@ -14,7 +14,7 @@
 
 from __future__ import print_function
 from time import sleep
-import os, sys, requests, arrow, re, socket
+import os, sys, requests, arrow, re, socket, types
 
 
 gismeteo_url_base = ( 'http://d6a5c954.services.gismeteo.ru/'
@@ -85,22 +85,28 @@ def main(args=None):
 
 	def parse_ts(ts):
 		# Well done on fucking-up iso8601 timestamps generation, gismeteo
-		match = re.search(r'^\d{4}-\d{2}-\d{2}T\d:\d{2}:\d{2}$', ts)
-		if match: ts = ts[:11] + '0' + ts[11:]
+		if isinstance(ts, types.StringTypes):
+			match = re.search(r'^\d{4}-\d{2}-\d{2}T\d:\d{2}:\d{2}$', ts)
+			if match: ts = ts[:11] + '0' + ts[11:]
 		try: ts = arrow.get(ts)
 		except:
 			log.error('Failed to parse timestamp: %s', ts)
 			raise
 		return ts.replace(tzinfo=opts.timezone)
 
-	fact_ts = parse_ts(fact.attrib['valid'])
+	day = parse_ts(arrow.now()).floor('day')
+	fact_tod = int(fact.attrib['tod'])
+	fact_ts = day.clone().replace(hour=valid_tod[fact_tod])
+
 	values = [('fact', float(fact_val.attrib['t']), fact_ts)]
 	for fc, fc_val in zip(fcs, fcs_val):
-		fc_ts = parse_ts(fc.attrib['valid'])
+		fc_tod = int(fc.attrib['tod'])
+		fc_ts = day.clone().replace(hour=valid_tod[fc_tod])
+		if fc_tod <= fact_tod: fc_ts = fc_ts.replace(days=1)
 		delta = fc_ts - fact_ts
-		assert delta.total_seconds() % (6 * 3600) == 0, [fc_ts, fact_ts, delta] # 6h increments
+		assert delta.total_seconds() % (6 * 3600) == 0, [fc_ts, fact_ts, delta]
 		offset = int(delta.total_seconds() // 3600)
-		assert offset in valid_offsets, [fc_ts, fact_ts, offset]
+		assert offset in valid_offsets, [fc_ts, fact_ts, offset, (fc_tod, fact_tod)]
 		values.append(('h_{:03d}'.format(offset), float(fc_val.attrib['t']), fc_ts))
 
 	## Connect to carbon TCP socket
@@ -145,7 +151,6 @@ def main(args=None):
 	## Done
 	sock.close()
 	log.debug('Finished successfully')
-
 
 
 if __name__ == '__main__': sys.exit(main())
