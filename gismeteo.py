@@ -14,6 +14,7 @@
 
 from __future__ import print_function
 from time import sleep
+from lxml import etree
 import os, sys, requests, arrow, re, socket, types
 
 
@@ -22,12 +23,58 @@ gismeteo_url_base = ( 'http://d6a5c954.services.gismeteo.ru/'
 	'forecast/?city={city_id}&lang=ru' )
 
 
+def send(host, port, reconnect, prefix, values):
+	# "values" should be list of tuples of "name, value, timestamp"
+
+	## Connect to carbon TCP socket
+	c, d_min, d_max, d_k = reconnect
+	d = d_min
+	while True:
+		try:
+			try:
+				addrinfo = list(reversed(socket.getaddrinfo(
+					host, port, socket.AF_UNSPEC, socket.SOCK_STREAM )))
+			except socket.error as err:
+				raise socket.gaierror(err.message)
+			assert addrinfo, addrinfo
+			while addrinfo:
+				# Try connecting to all of the returned addresses
+				af, socktype, proto, canonname, sa = addrinfo.pop()
+				try:
+					sock = socket.socket(af, socktype, proto)
+					sock.connect(sa)
+				except socket.error:
+					if not addrinfo: raise
+			log.debug('Connected to Carbon at %s', sa)
+		except (socket.error, socket.gaierror) as err:
+			if c <= 0: raise
+			c -= 1
+			if isinstance(err, socket.gaierror):
+				log.info('Failed to resolve host (%r): %s', host, err)
+			else:
+				log.info('Failed to connect to %s:%s: %s', host, port, err)
+			sleep(max(0, d))
+			d = max(d_min, min(d_max, d * d_k))
+		else: break
+
+	## Send stuff
+	for name, val, ts in values:
+		if isinstance(ts, arrow.Arrow): ts = ts.float_timestamp
+		line = '{}{} {} {}\n'.format(prefix or '', name, val, int(ts))
+		log.debug('Sending line: %r', line)
+		sock.sendall(line)
+
+	## Done
+	sock.close()
+
+
+
 def main(args=None):
 	import argparse
 	parser = argparse.ArgumentParser(
 		description='Script to grab Gismeteo (gismeteo.ru service) forecast'
 			' data for current time of the day and relay it to graphite carbon daemon.')
-	parser.add_argument('carbon', metavar='carbon_ip',
+	parser.add_argument('carbon', metavar='carbon_ip:port',
 		help='Carbon daemon IP address and port of TCP linereader socket.')
 	parser.add_argument('-c', '--city-id',
 		metavar='gismeteo_city_id', type=int, required=True,
@@ -44,7 +91,9 @@ def main(args=None):
 				' to carbon daemon if initial attempt(s) fail (floats, default: %(default)s).'
 			' Only applied to initial connection attempt'
 				' - if data cannot be sent after that, script fails.')
-	parser.add_argument('-d', '--debug', action='store_true', help='Verbose operation mode.')
+	parser.add_argument('-f', '--data', metavar='path',
+		help='Path to pre-fetched data dump to process.')
+	parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
 	opts = parser.parse_args(sys.argv[1:] if args is None else args)
 
 	global log
@@ -52,18 +101,26 @@ def main(args=None):
 	logging.basicConfig(level=logging.DEBUG if opts.debug else logging.WARNING)
 	log = logging.getLogger()
 
+	## Parse CLI
 	host, port = opts.carbon.split(':')
 	port = int(port)
+	c, d_min, d_max, d_k = map(float, opts.reconnect.split(':'))
+	assert c >= 0 and (d_k == 0 or d_k >= 1), [c, d_k]
+	reconnect = c, d_min, d_max, d_k
 
 	## Fetch XML data
-	url = gismeteo_url_base.format(city_id=opts.city_id)
-	res = requests.get(url)
-	res.raise_for_status()
-	xml = res.content
-	# with open('gismeteo_data') as src: xml = src.read()
+	if not opts.data:
+		log.debug('Fetching data...')
+		url = gismeteo_url_base.format(city_id=opts.city_id)
+		res = requests.get(url)
+		res.raise_for_status()
+		xml = res.content
+	else:
+		log.debug('Reading data...')
+		with open(opts.data) as src: xml = src.read()
 
 	## Make sure schema is what it's expected to be and get values
-	from lxml import etree
+	log.debug('Processing data...')
 	t = etree.fromstring(xml)
 
 	def dump(el=t): return etree.tostring(el, encoding='utf-8')
@@ -109,47 +166,9 @@ def main(args=None):
 		assert offset in valid_offsets, [fc_ts, fact_ts, offset, (fc_tod, fact_tod)]
 		values.append(('h_{:03d}'.format(offset), float(fc_val.attrib['t']), fc_ts))
 
-	## Connect to carbon TCP socket
-	c, d_min, d_max, d_k = map(float, opts.reconnect.split(':'))
-	assert c >= 0 and (d_k == 0 or d_k >= 1), [c, d_k]
-	d = d_min
-	while True:
-		try:
-			try:
-				addrinfo = list(reversed(socket.getaddrinfo(
-					host, port, socket.AF_UNSPEC, socket.SOCK_STREAM )))
-			except socket.error as err:
-				raise socket.gaierror(err.message)
-			assert addrinfo, addrinfo
-			while addrinfo:
-				# Try connecting to all of the returned addresses
-				af, socktype, proto, canonname, sa = addrinfo.pop()
-				try:
-					sock = socket.socket(af, socktype, proto)
-					sock.connect(sa)
-				except socket.error:
-					if not addrinfo: raise
-			log.debug('Connected to Carbon at {}:{}'.format(*sa))
-		except (socket.error, socket.gaierror) as err:
-			if c <= 0: raise
-			c -= 1
-			if isinstance(err, socket.gaierror):
-				log.info('Failed to resolve host ({!r}): {}'.format(host, err))
-			else:
-				log.info('Failed to connect to {}:{}: {}'.format(host, port, err))
-			sleep(max(0, d))
-			d = max(d_min, min(d_max, d * d_k))
-		else: break
-
-	## Send stuff
-	for name, val, ts in values:
-		if isinstance(ts, arrow.Arrow): ts = ts.float_timestamp
-		line = '{}{} {} {}\n'.format(opts.metric_prefix or '', name, val, int(ts))
-		log.debug('Sending line: {!r}'.format(line))
-		sock.sendall(line)
-
-	## Done
-	sock.close()
+	## Send
+	log.debug('Sending data...')
+	send(host, port, reconnect, opts.metric_prefix, values)
 	log.debug('Finished successfully')
 
 
