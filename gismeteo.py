@@ -214,10 +214,10 @@ def scrape_longterm(values_chk, tz='local', data_path=None):
 	## Remove values that are duplicate with short-term ones, make sure they match
 	for n, temp_chk, ts in values_chk:
 		if n not in val_chk_idx: continue
-		# gismeteo and e1 values can differ by a degree or two
 		val = val_chk_idx[n]
 		n, temp, fc_ts = val
-		assert abs(temp - temp_chk) <= 3 and ts == fc_ts, [val, temp_chk, ts]
+		# gismeteo and e1 values can differ by a fuckton, surprisingly
+		assert abs(temp - temp_chk) <= 10 and ts == fc_ts, [val, temp_chk, ts]
 		values.pop(values.index(val))
 
 	return values
