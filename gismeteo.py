@@ -206,6 +206,7 @@ def scrape_longterm(values_chk, tz='local', data_path=None):
 			delta = fc_ts - fact_ts
 			assert delta.total_seconds() % (6 * 3600) == 0, [fc_ts, fact_ts, delta]
 			offset = int(delta.total_seconds() // 3600) # most will be more than one day
+			if offset < 6: continue # past data
 			n = 'h_{:03d}'.format(offset)
 			val = n, temp, fc_ts
 			values.append(val)
