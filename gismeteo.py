@@ -114,6 +114,7 @@ def scrape_shortterm(city_id, tz='local', data_path=None):
 
 	day = parse_ts(fact.attrib['valid']).floor('day')
 	fact_tod = int(fact.attrib['tod'])
+	if fact_tod < 0: fact_tod = 0 # how the fuck they parse their own data... no idea!
 	fact_ts = day.replace(hour=valid_tod[fact_tod])
 
 	values = [('fact', float(fact_val.attrib['t']), fact_ts)]
