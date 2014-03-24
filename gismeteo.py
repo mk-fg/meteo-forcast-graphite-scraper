@@ -5,8 +5,15 @@
 from __future__ import print_function
 from time import sleep
 from lxml import etree, html
-import os, sys, requests, arrow, re, socket, types
+import os, sys, requests, arrow, re, socket, types, unicodedata
 
+
+DIGIT = dict( MINUS=u'-', ZERO=u'0', ONE=u'1', TWO=u'2', THREE=u'3',
+	FOUR=u'4', FIVE=u'5', SIX=u'6', SEVEN=u'7', EIGHT=u'8', NINE=u'9', STOP=u'.' )
+
+def digit_guess(unistr):
+	return u''.join( v for u in unistr
+		for k,v in DIGIT.viewitems() if k in unicodedata.name(u) )
 
 
 def send(host, port, reconnect, prefix, values):
@@ -202,7 +209,11 @@ def scrape_longterm(values_chk, tz='local', data_path=None):
 			assert fc_tod == tod_dict.index(tod_text.lower()), [fc_tod, tod_text]
 			temp, = row.xpath('./td[@class="weather-table-temp"]/p/text()')
 			assert u'°' in temp, repr(temp)
-			temp = float(temp.strip().split(u'°', 1)[0])
+			temp = temp.strip().split(u'°', 1)[0]
+			temp = temp.replace(u'\u2212', u'-') # py bug #6632
+			try: temp = float(temp)
+			except UnicodeEncodeError:
+				temp = float(digit_guess(temp))
 			fc_ts = date.replace(hour=valid_tod[fc_tod])
 			delta = fc_ts - fact_ts
 			assert delta.total_seconds() % (6 * 3600) == 0, [fc_ts, fact_ts, delta]
