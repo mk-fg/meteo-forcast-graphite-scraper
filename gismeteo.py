@@ -166,7 +166,7 @@ def scrape_longterm(values_chk, tz='local', data_path=None):
 	dow_dict = [ u'понедельник', u'вторник',\
 		u'среда', u'четверг', u'пятница', u'суббота', u'воскресенье' ]
 	month_dict = [ u'январ', u'феврал', u'март', u'апрел',\
-		[u'май', u'мая'], u'июн', u'июл', u'август', u'сентябр', u'октябр', u'декабр' ]
+		[u'май', u'мая'], u'июн', u'июл', u'август', u'сентябр', u'октябр', u'ноябр' , u'декабр' ]
 	tod_dict = [u'ночь', u'утро', u'день', u'вечер']
 
 	## Re-calculate current "tod" (0-4) and "fact_ts", as passed to graphite, for deltas
