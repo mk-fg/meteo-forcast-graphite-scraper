@@ -230,7 +230,7 @@ def scrape_longterm(values_chk, tz='local', data_path=None):
 		val = val_chk_idx[n]
 		n, temp, fc_ts = val
 		# gismeteo and e1 values can differ by a fuckton, surprisingly
-		assert abs(temp - temp_chk) <= 10 and ts == fc_ts, [val, temp_chk, ts]
+		# assert abs(temp - temp_chk) <= 10 and ts == fc_ts, [val, temp_chk, ts]
 		values.pop(values.index(val))
 
 	return values
